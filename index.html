@@ -1,0 +1,598 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>Cricket Latency Flow</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Barlow+Condensed:wght@400;600;700;900&family=DM+Sans:wght@400;500;600&display=swap');
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #030C16;
+    --surface: #071929;
+    --grid: rgba(0,180,255,0.035);
+    --event:    #FFD600;
+    --broadcast:#FF6B35;
+    --data:     #00CFFF;
+    --kalshi:   #00FF88;
+    --cricinfo: #FF3D5A;
+    --stadium:  #FFAA00;
+    --glass:    rgba(255,255,255,0.04);
+    --border:   rgba(255,255,255,0.07);
+    --text:     #E8F0FF;
+    --muted:    rgba(255,255,255,0.38);
+  }
+
+  html { font-size: 16px; }
+
+  body {
+    background: var(--bg);
+    background-image:
+      linear-gradient(var(--grid) 1px, transparent 1px),
+      linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+    background-size: 32px 32px;
+    font-family: 'DM Sans', sans-serif;
+    color: var(--text);
+    min-height: 100vh;
+    overflow-x: hidden;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .page {
+    max-width: 480px;
+    margin: 0 auto;
+    padding: 24px 16px 64px;
+  }
+
+  /* HEADER */
+  header { text-align: center; margin-bottom: 24px; animation: fadeDown .7s ease both; }
+  .eyebrow {
+    font-family: 'Space Mono', monospace;
+    font-size: 9px; letter-spacing: 3px;
+    color: var(--data); opacity: .65;
+    text-transform: uppercase; margin-bottom: 8px;
+  }
+  h1 {
+    font-family: 'Barlow Condensed', sans-serif;
+    font-size: clamp(28px, 8vw, 40px);
+    font-weight: 900; line-height: 1.0; letter-spacing: .5px;
+    background: linear-gradient(140deg, #fff 35%, var(--data) 100%);
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+  }
+  .subtitle {
+    margin-top: 8px; font-family: 'Space Mono', monospace;
+    font-size: 10px; color: var(--muted); line-height: 1.6;
+  }
+
+  /* LEGEND */
+  .legend {
+    display: flex; flex-wrap: wrap; gap: 7px;
+    justify-content: center; margin-bottom: 24px;
+    animation: fadeUp .7s .15s ease both;
+  }
+  .legend-pill {
+    display: flex; align-items: center; gap: 6px;
+    background: var(--glass); border: 1px solid var(--border);
+    border-radius: 100px; padding: 4px 11px 4px 8px;
+    font-family: 'Space Mono', monospace; font-size: 9px;
+    letter-spacing: .3px; white-space: nowrap;
+  }
+  .legend-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+
+  /* SHARED PIPELINE */
+  .shared-pipeline {
+    display: flex; flex-direction: column;
+    align-items: center; animation: fadeUp .6s .2s ease both;
+  }
+
+  /* NODE */
+  .node {
+    width: 100%; max-width: 320px;
+    border-radius: 14px; border: 1px solid;
+    padding: 14px 16px; text-align: center;
+    backdrop-filter: blur(10px); position: relative;
+  }
+  .node-icon { font-size: 28px; line-height: 1; margin-bottom: 4px; }
+  .node-label {
+    font-family: 'Barlow Condensed', sans-serif;
+    font-size: 16px; font-weight: 700;
+    letter-spacing: 1px; text-transform: uppercase;
+  }
+  .node-sub {
+    font-family: 'Space Mono', monospace;
+    font-size: 8.5px; color: var(--muted);
+    margin-top: 3px; line-height: 1.5;
+  }
+  .node-event    { background: rgba(255,214,0,.07); border-color: var(--event); }
+  .node-event .node-label { color: var(--event); }
+  .node-broadcast{ background: rgba(255,107,53,.07); border-color: var(--broadcast); }
+  .node-broadcast .node-label { color: var(--broadcast); }
+  .node-data     { background: rgba(0,207,255,.06); border-color: var(--data); }
+  .node-data .node-label { color: var(--data); }
+
+  /* ARROW */
+  .arrow { display: flex; flex-direction: column; align-items: center; }
+  .arrow-line {
+    width: 2px; height: 32px; position: relative;
+    overflow: hidden; border-radius: 1px;
+  }
+  .arrow-line::after {
+    content: ''; position: absolute;
+    top: -100%; left: 0; width: 100%; height: 100%;
+    animation: flowDown 1.3s linear infinite;
+  }
+  .arrowhead { width: 0; height: 0; border-left: 5px solid transparent; border-right: 5px solid transparent; }
+  .packet {
+    position: absolute; width: 5px; height: 5px;
+    border-radius: 50%; left: 50%; transform: translateX(-50%);
+    animation: packetFlow 1.5s linear infinite;
+  }
+
+  .a-event .arrow-line   { background: rgba(255,214,0,.14); }
+  .a-event .arrow-line::after { background: linear-gradient(to bottom, transparent, var(--event)); }
+  .a-event .arrowhead { border-top: 7px solid var(--event); }
+  .a-broadcast .arrow-line   { background: rgba(255,107,53,.14); }
+  .a-broadcast .arrow-line::after { background: linear-gradient(to bottom, transparent, var(--broadcast)); }
+  .a-broadcast .arrowhead { border-top: 7px solid var(--broadcast); }
+  .a-data .arrow-line   { background: rgba(0,207,255,.14); }
+  .a-data .arrow-line::after { background: linear-gradient(to bottom, transparent, var(--data)); }
+  .a-data .arrowhead { border-top: 7px solid var(--data); }
+  .a-kalshi .arrow-line   { background: rgba(0,255,136,.14); }
+  .a-kalshi .arrow-line::after { background: linear-gradient(to bottom, transparent, var(--kalshi)); }
+  .a-kalshi .arrowhead { border-top: 7px solid var(--kalshi); }
+  .a-cricinfo .arrow-line   { background: rgba(255,61,90,.14); }
+  .a-cricinfo .arrow-line::after { background: linear-gradient(to bottom, transparent, var(--cricinfo)); }
+  .a-cricinfo .arrowhead { border-top: 7px solid var(--cricinfo); }
+  .a-stadium .arrow-line   { background: rgba(255,170,0,.14); }
+  .a-stadium .arrow-line::after { background: linear-gradient(to bottom, transparent, var(--stadium)); }
+  .a-stadium .arrowhead { border-top: 7px solid var(--stadium); }
+
+  /* BADGE */
+  .badge {
+    font-family: 'Space Mono', monospace; font-size: 9px;
+    padding: 4px 12px; border-radius: 100px;
+    letter-spacing: .3px; white-space: nowrap;
+    animation: pulse 2.2s ease-in-out infinite;
+  }
+  .badge-fast { background: rgba(0,255,136,.12); color: var(--kalshi);   border: 1px solid rgba(0,255,136,.3); }
+  .badge-med  { background: rgba(255,107,53,.12); color: var(--broadcast);border: 1px solid rgba(255,107,53,.3); }
+  .badge-slow { background: rgba(255,61,90,.12);  color: var(--cricinfo); border: 1px solid rgba(255,61,90,.3); }
+  .badge-zero { background: rgba(255,170,0,.12);  color: var(--stadium);  border: 1px solid rgba(255,170,0,.3); }
+
+  /* TABS */
+  .tab-wrap { margin: 24px 0 0; animation: fadeUp .6s .35s ease both; }
+  .tab-label {
+    font-family: 'Space Mono', monospace; font-size: 9px;
+    letter-spacing: 2px; color: var(--muted);
+    text-transform: uppercase; text-align: center; margin-bottom: 10px;
+  }
+  .tabs { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; margin-bottom: 16px; }
+  .tab-btn {
+    padding: 9px 4px; border-radius: 10px;
+    border: 1px solid var(--border); background: var(--glass);
+    color: var(--muted); font-family: 'Barlow Condensed', sans-serif;
+    font-size: 13px; font-weight: 700; letter-spacing: .5px;
+    text-transform: uppercase; cursor: pointer;
+    transition: all .2s ease; text-align: center; line-height: 1.3;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .tab-btn.active-stadium  { background: rgba(255,170,0,.12); border-color: var(--stadium); color: var(--stadium); box-shadow: 0 0 16px rgba(255,170,0,.15); }
+  .tab-btn.active-kalshi   { background: rgba(0,255,136,.1);  border-color: var(--kalshi);  color: var(--kalshi);  box-shadow: 0 0 16px rgba(0,255,136,.15); }
+  .tab-btn.active-cricinfo { background: rgba(255,61,90,.1);  border-color: var(--cricinfo);color: var(--cricinfo);box-shadow: 0 0 16px rgba(255,61,90,.15); }
+
+  /* PANELS */
+  .panel { display: none; flex-direction: column; align-items: center; }
+  .panel.active { display: flex; animation: panelIn .3s ease both; }
+  @keyframes panelIn { from{opacity:0;transform:translateY(10px)} to{opacity:1;transform:translateY(0)} }
+
+  /* STAGE CARD */
+  .stage-card {
+    width: 100%; max-width: 320px;
+    background: var(--glass); border: 1px solid var(--border);
+    border-radius: 12px; padding: 12px 14px; text-align: center;
+  }
+  .stage-title {
+    font-family: 'Barlow Condensed', sans-serif;
+    font-size: 15px; font-weight: 700;
+    letter-spacing: .5px; text-transform: uppercase;
+  }
+  .stage-desc {
+    font-family: 'Space Mono', monospace;
+    font-size: 8.5px; color: var(--muted);
+    margin-top: 4px; line-height: 1.6;
+  }
+
+  /* END NODE */
+  .end-node {
+    width: 100%; max-width: 320px;
+    border-radius: 14px; border: 1px solid;
+    padding: 14px 16px; text-align: center;
+  }
+  .end-node .node-icon { font-size: 26px; margin-bottom: 4px; }
+  .end-node .node-label {
+    font-family: 'Barlow Condensed', sans-serif;
+    font-size: 16px; font-weight: 700;
+    letter-spacing: 1px; text-transform: uppercase;
+  }
+  .end-node .node-sub {
+    font-family: 'Space Mono', monospace;
+    font-size: 8.5px; color: var(--muted); margin-top: 3px;
+  }
+  .end-stadium  { background: rgba(255,170,0,.07); border-color: var(--stadium); }
+  .end-stadium .node-label { color: var(--stadium); }
+  .end-kalshi   { background: rgba(0,255,136,.07); border-color: var(--kalshi); }
+  .end-kalshi .node-label  { color: var(--kalshi); }
+  .end-cricinfo { background: rgba(255,61,90,.07); border-color: var(--cricinfo); }
+  .end-cricinfo .node-label{ color: var(--cricinfo); }
+
+  /* GLOWS */
+  .glow-event   { animation: glowE 2.2s ease-in-out infinite; }
+  .glow-kalshi  { animation: glowK 2.4s ease-in-out infinite; }
+  .glow-cricinfo{ animation: glowC 2.4s ease-in-out infinite; }
+  @keyframes glowE { 0%,100%{box-shadow:0 0 24px rgba(255,214,0,.18)} 50%{box-shadow:0 0 44px rgba(255,214,0,.42),0 0 70px rgba(255,214,0,.1)} }
+  @keyframes glowK { 0%,100%{box-shadow:0 0 20px rgba(0,255,136,.14)} 50%{box-shadow:0 0 38px rgba(0,255,136,.34)} }
+  @keyframes glowC { 0%,100%{box-shadow:0 0 20px rgba(255,61,90,.12)} 50%{box-shadow:0 0 36px rgba(255,61,90,.28)} }
+
+  .winner {
+    display: inline-flex; align-items: center; gap: 5px;
+    background: rgba(255,170,0,.13); border: 1px solid rgba(255,170,0,.35);
+    color: var(--stadium); font-family: 'Space Mono', monospace;
+    font-size: 9px; padding: 4px 12px; border-radius: 100px; margin-top: 8px;
+  }
+  .total-time {
+    font-family: 'Space Mono', monospace; font-size: 9px;
+    text-align: center; margin-top: 8px;
+  }
+
+  /* DIVIDER */
+  .divider {
+    height: 1px;
+    background: linear-gradient(90deg, transparent, var(--border), transparent);
+    margin: 28px 0;
+  }
+
+  /* TIMELINE */
+  .timeline-section { animation: fadeUp .6s .5s ease both; }
+  .section-title {
+    font-family: 'Barlow Condensed', sans-serif;
+    font-size: 15px; font-weight: 700; letter-spacing: 2px;
+    text-transform: uppercase; color: var(--muted);
+    text-align: center; margin-bottom: 16px;
+  }
+  .tl-row { margin-bottom: 10px; }
+  .tl-meta { display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px; }
+  .tl-name { font-family: 'Space Mono', monospace; font-size: 9px; letter-spacing: .3px; }
+  .tl-time { font-family: 'Space Mono', monospace; font-size: 9px; opacity: .55; }
+  .tl-bar-bg {
+    height: 36px; background: var(--glass);
+    border: 1px solid var(--border); border-radius: 8px;
+    overflow: hidden; position: relative;
+  }
+  .tl-bar-fill {
+    position: absolute; top: 0; bottom: 0; left: 0;
+    display: flex; align-items: center; padding-left: 12px;
+    border-radius: 7px; font-family: 'Space Mono', monospace;
+    font-size: 9px; font-weight: 700; white-space: nowrap; overflow: hidden;
+  }
+  .tl-stadium {
+    width: 3%;
+    background: linear-gradient(90deg, rgba(255,170,0,.45), rgba(255,170,0,.1));
+    border-right: 2px solid var(--stadium); color: var(--stadium);
+    animation: slideR 1.1s 1.1s cubic-bezier(.16,1,.3,1) both;
+  }
+  .tl-kalshi {
+    width: 30%;
+    background: linear-gradient(90deg, rgba(0,255,136,.28), rgba(0,255,136,.05));
+    border-right: 2px solid var(--kalshi); color: var(--kalshi);
+    animation: slideR 1.1s 1.3s cubic-bezier(.16,1,.3,1) both;
+  }
+  .tl-cricinfo {
+    width: 82%;
+    background: linear-gradient(90deg, rgba(255,61,90,.22), rgba(255,61,90,.04));
+    border-right: 2px solid var(--cricinfo); color: var(--cricinfo);
+    animation: slideR 1.1s 1.5s cubic-bezier(.16,1,.3,1) both;
+  }
+  @keyframes slideR { from { width:0; opacity:0; } }
+  .tl-axis {
+    display: flex; justify-content: space-between; padding: 0 2px;
+    margin-top: 6px; font-family: 'Space Mono', monospace;
+    font-size: 8px; color: rgba(255,255,255,.2);
+  }
+  .edge-summary {
+    background: var(--glass); border: 1px solid var(--border);
+    border-radius: 12px; padding: 14px 16px; margin-top: 16px; text-align: center;
+  }
+  .edge-summary p { font-family: 'Space Mono', monospace; font-size: 9px; line-height: 1.8; color: var(--muted); }
+  .hl-k { color: var(--kalshi); font-weight: 700; }
+  .hl-c { color: var(--cricinfo); font-weight: 700; }
+
+  /* WHY CARDS */
+  .why-grid { display: flex; flex-direction: column; gap: 10px; animation: fadeUp .6s .6s ease both; }
+  .why-card { background: var(--glass); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; }
+  .why-title { font-family: 'Barlow Condensed', sans-serif; font-size: 15px; font-weight: 700; letter-spacing: .5px; margin-bottom: 8px; }
+  .why-list { list-style: none; display: flex; flex-direction: column; gap: 5px; }
+  .why-list li { font-family: 'Space Mono', monospace; font-size: 8.5px; color: var(--muted); line-height: 1.5; display: flex; gap: 7px; }
+  .why-list li::before { content: '→'; opacity: .5; flex-shrink: 0; }
+
+  .footer {
+    text-align: center; margin-top: 28px;
+    font-family: 'Space Mono', monospace;
+    font-size: 7.5px; color: rgba(255,255,255,.15);
+    letter-spacing: .8px; line-height: 1.8;
+  }
+
+  /* KEYFRAMES */
+  @keyframes fadeDown { from{opacity:0;transform:translateY(-16px)} to{opacity:1;transform:translateY(0)} }
+  @keyframes fadeUp   { from{opacity:0;transform:translateY(14px)}  to{opacity:1;transform:translateY(0)} }
+  @keyframes flowDown { from{top:-100%} to{top:100%} }
+  @keyframes packetFlow { 0%{top:0;opacity:0} 10%{opacity:1} 90%{opacity:1} 100%{top:100%;opacity:0} }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.55} }
+
+  /* DESKTOP */
+  @media (min-width: 600px) {
+    .page { padding: 36px 24px 72px; }
+    h1 { font-size: 44px; }
+    .why-grid { flex-direction: row; }
+    .why-card { flex: 1; }
+    .node, .end-node, .stage-card { max-width: 360px; }
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <header>
+    <div class="eyebrow">Real-Time Latency Analysis · IPL 2026</div>
+    <h1>Cricket Event<br>to Your Screen</h1>
+    <p class="subtitle">How a wicket travels from the ground<br>to Robinhood vs. ESPN Cricinfo</p>
+  </header>
+
+  <div class="legend">
+    <div class="legend-pill"><div class="legend-dot" style="background:var(--event)"></div>Live Event</div>
+    <div class="legend-pill"><div class="legend-dot" style="background:var(--broadcast)"></div>Broadcast</div>
+    <div class="legend-pill"><div class="legend-dot" style="background:var(--data)"></div>Data Feed</div>
+    <div class="legend-pill"><div class="legend-dot" style="background:var(--kalshi)"></div>Kalshi/Robinhood</div>
+    <div class="legend-pill"><div class="legend-dot" style="background:var(--cricinfo)"></div>ESPN Cricinfo</div>
+    <div class="legend-pill"><div class="legend-dot" style="background:var(--stadium)"></div>You (Stadium)</div>
+  </div>
+
+  <!-- SHARED TOP PIPELINE -->
+  <div class="shared-pipeline">
+
+    <div class="node node-event glow-event">
+      <div class="node-icon">🏏</div>
+      <div class="node-label">Live Cricket Event</div>
+      <div class="node-sub">Wicket · Six · Boundary · No-ball<br>happens in real life at the ground</div>
+    </div>
+
+    <div class="arrow a-event">
+      <div class="arrow-line"><div class="packet" style="background:var(--event)"></div></div>
+      <div class="arrowhead"></div>
+    </div>
+    <div class="badge badge-med">+0.5–1s · camera capture &amp; encode</div>
+    <div class="arrow a-broadcast">
+      <div class="arrow-line"><div class="packet" style="background:var(--broadcast); animation-delay:.4s"></div></div>
+      <div class="arrowhead"></div>
+    </div>
+
+    <div class="node node-broadcast">
+      <div class="node-icon">📡</div>
+      <div class="node-label">Broadcast Capture</div>
+      <div class="node-sub">Stumpcam · Hawkeye · Spider-cam<br>signal encoded &amp; transmitted</div>
+    </div>
+
+    <div class="arrow a-broadcast">
+      <div class="arrow-line"><div class="packet" style="background:var(--broadcast); animation-delay:.2s"></div></div>
+      <div class="arrowhead"></div>
+    </div>
+    <div class="badge badge-med">+0.2–0.5s · satellite / fibre uplink</div>
+    <div class="arrow a-data">
+      <div class="arrow-line"><div class="packet" style="background:var(--data); animation-delay:.6s"></div></div>
+      <div class="arrowhead"></div>
+    </div>
+
+    <div class="node node-data">
+      <div class="node-icon">🛰️</div>
+      <div class="node-label">Sports Data Provider</div>
+      <div class="node-sub">Genius Sports · Sportradar · ICC feed<br>ingests &amp; structures raw event data</div>
+    </div>
+
+  </div>
+
+  <!-- TAB SWITCHER -->
+  <div class="tab-wrap">
+    <div class="tab-label">Tap a pipeline to explore ↓</div>
+    <div class="tabs">
+      <button class="tab-btn" id="btn-stadium"  onclick="switchTab('stadium')">👁<br>Stadium<br>Fan</button>
+      <button class="tab-btn" id="btn-kalshi"   onclick="switchTab('kalshi')">⚡<br>Kalshi<br>Robinhood</button>
+      <button class="tab-btn" id="btn-cricinfo" onclick="switchTab('cricinfo')">🐢<br>ESPN<br>Cricinfo</button>
+    </div>
+
+    <!-- STADIUM -->
+    <div class="panel" id="panel-stadium">
+      <div class="stage-card">
+        <div class="stage-title" style="color:var(--stadium)">👁 Direct Vision</div>
+        <div class="stage-desc">Eyes see the event with zero encoding,<br>zero network hops. Purely physical.</div>
+      </div>
+      <div class="arrow a-stadium"><div class="arrow-line"><div class="packet" style="background:var(--stadium)"></div></div><div class="arrowhead"></div></div>
+      <div class="badge badge-zero">~0ms · instant</div>
+      <div class="arrow a-stadium"><div class="arrow-line"><div class="packet" style="background:var(--stadium); animation-delay:.5s"></div></div><div class="arrowhead"></div></div>
+      <div class="stage-card">
+        <div class="stage-title" style="color:var(--stadium)">🧠 Brain Processes</div>
+        <div class="stage-desc">Catch forming, ball trajectory, fielder<br>reaction — qualitative read no sensor can replicate.</div>
+      </div>
+      <div class="arrow a-stadium"><div class="arrow-line"><div class="packet" style="background:var(--stadium); animation-delay:.3s"></div></div><div class="arrowhead"></div></div>
+      <div class="badge badge-zero">+200ms · human reaction</div>
+      <div class="arrow a-stadium"><div class="arrow-line"><div class="packet" style="background:var(--stadium); animation-delay:.8s"></div></div><div class="arrowhead"></div></div>
+      <div class="stage-card">
+        <div class="stage-title" style="color:var(--broadcast)">📱 Open App → Trade ⚠️</div>
+        <div class="stage-desc">Unlock phone, navigate to market,<br>tap Yes/No, swipe to confirm.<br>UX friction is your biggest enemy.</div>
+      </div>
+      <div class="arrow a-stadium"><div class="arrow-line"><div class="packet" style="background:var(--stadium); animation-delay:.1s"></div></div><div class="arrowhead"></div></div>
+      <div class="badge badge-med">+2–4s · UX friction kills edge ⚠️</div>
+      <div class="arrow a-stadium"><div class="arrow-line"></div><div class="arrowhead"></div></div>
+      <div class="end-node end-stadium">
+        <div class="node-icon">🙋</div>
+        <div class="node-label">Your Trade Placed</div>
+        <div class="node-sub">Edge window: ~2–5s before algos catch up</div>
+      </div>
+      <div class="winner">⚡ Earliest possible edge</div>
+      <div class="total-time" style="color:var(--stadium)">Total window: ~0ms raw · ~2–5s with UX</div>
+    </div>
+
+    <!-- KALSHI -->
+    <div class="panel" id="panel-kalshi">
+      <div class="stage-card">
+        <div class="stage-title" style="color:var(--data)">🔌 API Ingest</div>
+        <div class="stage-desc">Raw structured feed from Genius Sports<br>ingested via persistent WebSocket.<br>No polling. No wait.</div>
+      </div>
+      <div class="arrow a-data"><div class="arrow-line"><div class="packet" style="background:var(--data)"></div></div><div class="arrowhead"></div></div>
+      <div class="badge badge-fast">+0.1–0.3s · low-latency API</div>
+      <div class="arrow a-kalshi"><div class="arrow-line"><div class="packet" style="background:var(--kalshi); animation-delay:.4s"></div></div><div class="arrowhead"></div></div>
+      <div class="stage-card">
+        <div class="stage-title" style="color:var(--kalshi)">🤖 Market Maker Algo</div>
+        <div class="stage-desc">Susquehanna algos instantly reprice<br>YES/NO contracts on new event.<br>Microsecond-level repricing.</div>
+      </div>
+      <div class="arrow a-kalshi"><div class="arrow-line"><div class="packet" style="background:var(--kalshi); animation-delay:.2s"></div></div><div class="arrowhead"></div></div>
+      <div class="badge badge-fast">+0.05s · order book repriced</div>
+      <div class="arrow a-kalshi"><div class="arrow-line"><div class="packet" style="background:var(--kalshi); animation-delay:.7s"></div></div><div class="arrowhead"></div></div>
+      <div class="stage-card">
+        <div class="stage-title" style="color:var(--kalshi)">📤 WebSocket Push</div>
+        <div class="stage-desc">Price change pushed instantly to all<br>connected Robinhood app clients.<br>No polling. No CDN delay.</div>
+      </div>
+      <div class="arrow a-kalshi"><div class="arrow-line"><div class="packet" style="background:var(--kalshi); animation-delay:.9s"></div></div><div class="arrowhead"></div></div>
+      <div class="badge badge-fast">+0.1s · persistent socket</div>
+      <div class="arrow a-kalshi"><div class="arrow-line"></div><div class="arrowhead"></div></div>
+      <div class="end-node end-kalshi glow-kalshi">
+        <div class="node-icon">📱</div>
+        <div class="node-label">Robinhood App Updates</div>
+        <div class="node-sub">Market price visibly moves in real-time</div>
+      </div>
+      <div class="total-time" style="color:var(--kalshi)">Total: ~1.5–3s from live event</div>
+    </div>
+
+    <!-- CRICINFO -->
+    <div class="panel" id="panel-cricinfo">
+      <div class="stage-card">
+        <div class="stage-title" style="color:var(--data)">🔌 API Ingest</div>
+        <div class="stage-desc">Same upstream Genius Sports/ICC feed,<br>but routed through ESPN's<br>editorial infrastructure.</div>
+      </div>
+      <div class="arrow a-data"><div class="arrow-line"><div class="packet" style="background:var(--data)"></div></div><div class="arrowhead"></div></div>
+      <div class="badge badge-med">+0.3–1s · editorial pipeline</div>
+      <div class="arrow a-cricinfo"><div class="arrow-line"><div class="packet" style="background:var(--cricinfo); animation-delay:.5s"></div></div><div class="arrowhead"></div></div>
+      <div class="stage-card">
+        <div class="stage-title" style="color:var(--cricinfo)">📝 Scorecard Renderer</div>
+        <div class="stage-desc">Ball-by-ball commentary generated,<br>stats recalculated, run rates updated,<br>partnership records refreshed.</div>
+      </div>
+      <div class="arrow a-cricinfo"><div class="arrow-line"><div class="packet" style="background:var(--cricinfo); animation-delay:.3s"></div></div><div class="arrowhead"></div></div>
+      <div class="badge badge-slow">+1–2s · render &amp; CDN cache bust</div>
+      <div class="arrow a-cricinfo"><div class="arrow-line"><div class="packet" style="background:var(--cricinfo); animation-delay:.8s"></div></div><div class="arrowhead"></div></div>
+      <div class="stage-card">
+        <div class="stage-title" style="color:var(--cricinfo)">🔄 HTTP Polling / SSE</div>
+        <div class="stage-desc">Client polls on interval or waits for SSE.<br>Stale CDN edge nodes add extra delay<br>before the page refresh arrives.</div>
+      </div>
+      <div class="arrow a-cricinfo"><div class="arrow-line"><div class="packet" style="background:var(--cricinfo); animation-delay:.6s"></div></div><div class="arrowhead"></div></div>
+      <div class="badge badge-slow">+2–5s · poll interval lag</div>
+      <div class="arrow a-cricinfo"><div class="arrow-line"></div><div class="arrowhead"></div></div>
+      <div class="end-node end-cricinfo glow-cricinfo">
+        <div class="node-icon">📱</div>
+        <div class="node-label">Cricinfo Score Updates</div>
+        <div class="node-sub">Built for readability, not trading speed</div>
+      </div>
+      <div class="total-time" style="color:var(--cricinfo)">Total: ~5–12s from live event</div>
+    </div>
+
+  </div><!-- /tab-wrap -->
+
+  <div class="divider"></div>
+
+  <!-- TIMELINE -->
+  <div class="timeline-section">
+    <div class="section-title">Cumulative Latency</div>
+
+    <div class="tl-row">
+      <div class="tl-meta">
+        <span class="tl-name" style="color:var(--stadium)">👁 You at Stadium</span>
+        <span class="tl-time">~0ms raw</span>
+      </div>
+      <div class="tl-bar-bg"><div class="tl-bar-fill tl-stadium">~0ms</div></div>
+    </div>
+
+    <div class="tl-row">
+      <div class="tl-meta">
+        <span class="tl-name" style="color:var(--kalshi)">⚡ Kalshi / Robinhood</span>
+        <span class="tl-time">~1.5–3s</span>
+      </div>
+      <div class="tl-bar-bg"><div class="tl-bar-fill tl-kalshi">~1.5–3s</div></div>
+    </div>
+
+    <div class="tl-row">
+      <div class="tl-meta">
+        <span class="tl-name" style="color:var(--cricinfo)">🐢 ESPN Cricinfo</span>
+        <span class="tl-time">~5–12s</span>
+      </div>
+      <div class="tl-bar-bg"><div class="tl-bar-fill tl-cricinfo">~5–12s</div></div>
+    </div>
+
+    <div class="tl-axis">
+      <span>0s</span><span>2s</span><span>4s</span><span>6s</span><span>8s</span><span>10s</span><span>12s</span>
+    </div>
+
+    <div class="edge-summary">
+      <p>
+        Your stadium edge vs Robinhood: <span class="hl-k">~2–5 seconds</span><br>
+        Robinhood ahead of Cricinfo: <span class="hl-c">~3–9 seconds</span><br>
+        Real bottleneck: <span class="hl-c">your UX friction</span>, not data speed
+      </p>
+    </div>
+  </div>
+
+  <div class="divider"></div>
+
+  <!-- WHY CARDS -->
+  <div class="why-grid">
+    <div class="why-card" style="border-color:rgba(0,255,136,.18)">
+      <div class="why-title" style="color:var(--kalshi)">⚡ Why Kalshi wins</div>
+      <ul class="why-list">
+        <li>Persistent WebSocket — zero poll delay</li>
+        <li>Susquehanna algos reprice in microseconds</li>
+        <li>No commentary or editorial queue</li>
+        <li>Finance infra tuned for latency-critical ops</li>
+        <li>Crowd trading IS the signal — no render step</li>
+      </ul>
+    </div>
+    <div class="why-card" style="border-color:rgba(255,61,90,.18)">
+      <div class="why-title" style="color:var(--cricinfo)">🐢 Why Cricinfo lags</div>
+      <ul class="why-list">
+        <li>HTTP polling adds 2–5s per update cycle</li>
+        <li>Commentary + ball text must be generated</li>
+        <li>CDN edge nodes serve stale cached content</li>
+        <li>Scorecard re-render is compute-heavy</li>
+        <li>Built for readability, not trading latency</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="footer">
+    ROBINHOOD DERIVATIVES LLC · KALSHI EX LLC (CFTC-DCM)<br>
+    DATA: GENIUS SPORTS / SPORTRADAR / ICC OFFICIAL FEED
+  </div>
+
+</div>
+
+<script>
+  function switchTab(tab) {
+    ['stadium','kalshi','cricinfo'].forEach(t => {
+      document.getElementById('panel-' + t).classList.remove('active');
+      const btn = document.getElementById('btn-' + t);
+      btn.classList.remove('active-stadium','active-kalshi','active-cricinfo');
+    });
+    document.getElementById('panel-' + tab).classList.add('active');
+    document.getElementById('btn-' + tab).classList.add('active-' + tab);
+  }
+  switchTab('kalshi');
+</script>
+</body>
+</html>
